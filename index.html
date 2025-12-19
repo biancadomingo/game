@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rhythm Game</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: #ffd6e7; /* light pink */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: Arial, sans-serif;
+    }
+    .wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    #game {
+      background: #ffe6f0;
+      border: 2px solid #ff9ac4;
+      /* no border-radius */
+      display: block;
+    }
+    #startBtn {
+      padding: 4px 10px;
+      border: 1px solid #ff9ac4;
+      background: #ffc1da;
+      cursor: pointer;
+      font-size: 14px;
+      /* no border-radius */
+    }
+    #startBtn:active {
+      transform: translateY(1px);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game" width="480" height="640"></canvas>
+    <button id="startBtn">Start! use ASL; and hit the keys at the right time</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const startBtn = document.getElementById("startBtn");
+
+    const LANES = 4;
+    const laneWidth = canvas.width / LANES;
+    const hitLineY = canvas.height - 120;
+
+    const NOTE_WIDTH = laneWidth * 0.6;
+    const NOTE_HEIGHT = 24;
+    const NOTE_SPEED = 240; // pixels per second
+
+    const HIT_WINDOW_PERFECT = 0.08;
+    const HIT_WINDOW_GOOD = 0.16;
+    const HIT_WINDOW_MISS = 0.25;
+
+    // A S L ; controls
+    const KEY_TO_LANE = {
+      "a": 0,
+      "s": 1,
+      "l": 2,
+      ";": 3
+    };
+
+    // Simple built-in chart
+    const baseChart = (() => {
+      const arr = [];
+      let t = 2.0;
+      for (let i = 0; i < 32; i++) {
+        arr.push({ time: t, lane: i % LANES });
+        t += 0.5;
+      }
+      return arr;
+    })();
+
+    let notes = [];
+    let isPlaying = false;
+    let startTime = null;
+    let lastTimestamp = null;
+    let currentTime = 0;
+
+    let score = 0;
+    let combo = 0;
+    let totalJudged = 0;
+    let totalHit = 0;
+
+    let lastJudgment = "";
+    let lastJudgmentTimer = 0; // seconds
+
+    function resetGame() {
+      notes = baseChart.map(n => ({
+        time: n.time,
+        lane: n.lane,
+        judged: false
+      }));
+      isPlaying = true;
+      startTime = null;
+      lastTimestamp = null;
+      currentTime = 0;
+
+      score = 0;
+      combo = 0;
+      totalJudged = 0;
+      totalHit = 0;
+      lastJudgment = "";
+      lastJudgmentTimer = 0;
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function handleKeyDown(e) {
+      if (!isPlaying) return;
+
+      const key = e.key.toLowerCase();
+      if (!(key in KEY_TO_LANE)) return;
+
+      const lane = KEY_TO_LANE[key];
+      const now = currentTime;
+
+      let bestNote = null;
+      let bestDt = Infinity;
+
+      for (const note of notes) {
+        if (note.judged) continue;
+        if (note.lane !== lane) continue;
+
+        const dt = Math.abs(note.time - now);
+        if (dt <= HIT_WINDOW_MISS && dt < bestDt) {
+          bestDt = dt;
+          bestNote = note;
+        }
+      }
+
+      if (!bestNote) return;
+
+      bestNote.judged = true;
+      totalJudged++;
+
+      const timeError = bestDt;
+      if (timeError <= HIT_WINDOW_PERFECT) {
+        lastJudgment = "yay";
+        score += 1000;
+        combo++;
+        totalHit++;
+      } else if (timeError <= HIT_WINDOW_GOOD) {
+        lastJudgment = "um";
+        score += 500;
+        combo++;
+        totalHit++;
+      } else {
+        lastJudgment = "bruh";
+        combo = 0;
+      }
+
+      lastJudgmentTimer = 0.5;
+    }
+
+    function gameLoop(timestamp) {
+      if (!isPlaying) return;
+
+      if (startTime === null) {
+        startTime = timestamp;
+        lastTimestamp = timestamp;
+      }
+
+      const dt = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
+      currentTime = (timestamp - startTime) / 1000;
+
+      lastJudgmentTimer = Math.max(0, lastJudgmentTimer - dt);
+
+      updateNotes();
+      render();
+
+      const allJudged = notes.every(n => n.judged);
+      const lastNoteTime = notes.length ? notes[notes.length - 1].time : 0;
+      if (allJudged && currentTime > lastNoteTime + 2) {
+        isPlaying = false;
+      }
+
+      if (isPlaying) {
+        requestAnimationFrame(gameLoop);
+      }
+    }
+
+    function updateNotes() {
+      for (const note of notes) {
+        if (note.judged) continue;
+        if (currentTime - note.time > HIT_WINDOW_MISS) {
+          note.judged = true;
+          totalJudged++;
+          combo = 0;
+          lastJudgment = "Miss";
+          lastJudgmentTimer = 0.5;
+        }
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Lanes
+      for (let i = 0; i < LANES; i++) {
+        const x = i * laneWidth;
+        ctx.fillStyle = i % 2 === 0 ? "#ffd0e0" : "#ffcade";
+        ctx.fillRect(x, 0, laneWidth, canvas.height);
+
+        ctx.strokeStyle = "#ff9ac4";
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+
+      // Hit line
+      ctx.strokeStyle = "#ff5c9c";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, hitLineY);
+      ctx.lineTo(canvas.width, hitLineY);
+      ctx.stroke();
+
+      // Draw notes (rectangles only)
+      for (const note of notes) {
+        if (note.judged) continue;
+
+        const timeToHit = note.time - currentTime;
+        const y = hitLineY - timeToHit * NOTE_SPEED;
+
+        if (y < -NOTE_HEIGHT || y > canvas.height + NOTE_HEIGHT) continue;
+
+        const laneX = note.lane * laneWidth + (laneWidth - NOTE_WIDTH) / 2;
+        ctx.fillStyle = "#ff5c9c";
+        ctx.fillRect(laneX, y, NOTE_WIDTH, NOTE_HEIGHT);
+      }
+
+      // Judgment text in the middle (this is the only text)
+      if (lastJudgmentTimer > 0 && lastJudgment) {
+        ctx.font = "24px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        let alpha = lastJudgmentTimer * 2;
+        if (alpha > 1) alpha = 1;
+
+        let color = "rgba(0,0,0," + alpha + ")";
+        ctx.fillStyle = color;
+        ctx.fillText(lastJudgment, canvas.width / 2, hitLineY - 40);
+      }
+    }
+
+    startBtn.addEventListener("click", resetGame);
+    document.addEventListener("keydown", handleKeyDown);
+
+    // initial blank render
+    render();
+  </script>
+</body>
+</html>
